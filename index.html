@@ -2490,6 +2490,7 @@
     <span><kbd>Enter</kbd> open</span>
     <span><kbd>Space</kbd> mark done</span>
     <span><kbd>Esc</kbd> close &amp; save</span>
+    <span><kbd>Ctrl</kbd><kbd>Z</kbd> undo</span>
     <span class="shortcut-sep">|</span>
     <span><kbd>Ctrl</kbd><kbd>F</kbd> search</span>
     <span><kbd>Ctrl</kbd><kbd>B</kbd>/<kbd>I</kbd> bold, italic</span>
@@ -3587,6 +3588,9 @@ function toast(msg, { actionLabel, onAction, duration = 5000 } = {}) {
     )
   );
   toastsRoot.append(t);
+  t._dismiss = dismiss;
+  const shown = $$(".toast:not(.exit)", toastsRoot);
+  if (shown.length > 3) shown[0]._dismiss();
   const timer = setTimeout(dismiss, duration);
   function dismiss() {
     clearTimeout(timer);
@@ -3594,6 +3598,125 @@ function toast(msg, { actionLabel, onAction, duration = 5000 } = {}) {
     t.addEventListener("animationend", () => t.remove(), { once: true });
   }
   return { dismiss };
+}
+
+/* ---------- Undo ---------- */
+// A change offered for undo in a toast stays undoable once the toast has gone:
+// Ctrl/Cmd+Z, outside text fields (they keep their own undo), runs the latest
+// one. It's a single step. Each undo first checks that what it would put back
+// is still as it was left, so a change made since, here or on another device,
+// is never overwritten.
+let lastUndo = null;
+
+function offerUndo(msg, revert, { duration = 8000 } = {}) {
+  const offer = { revert, at: Date.now(), duration, done: false };
+  offer.toast = toast(msg, { actionLabel: "Undo", onAction: () => runUndo(offer), duration });
+  lastUndo = offer;
+  return offer;
+}
+
+// revert() returns false when it can't, or else what it did, which Ctrl+Z
+// says (the Undo button needs no word: it was pressed on the toast).
+function runUndo(offer, { byKey = false } = {}) {
+  if (lastUndo === offer) lastUndo = null;
+  if (offer.done) return;
+  offer.done = true;
+  offer.toast.dismiss();
+  const did = offer.revert();
+  if (did === false) toast("That has changed since, so it can't be undone.", { duration: 4000 });
+  else if (byKey) toast(did || "Undone", { duration: 3000 });
+}
+
+function columnById(id) {
+  for (const f of state.folders) {
+    const c = (f.categories || []).find(c => c.id === id);
+    if (c) return c;
+  }
+  return null;
+}
+
+// How a toast names a card: its subject, shortened, unless it's private.
+function cardName(task) {
+  if (task.private || categoryHidden(columnById(task.categoryId))) return "a private card";
+  const s = (task.subject || "").trim() || "Untitled";
+  return `"${s.length > 40 ? s.slice(0, 39).trimEnd() + "\u2026" : s}"`;
+}
+
+// Where a card sits: its column and its neighbours there, to put it back by.
+function cardPlace(task) {
+  const i = state.tasks.indexOf(task);
+  const same = t => t.categoryId === task.categoryId;
+  const before = state.tasks.slice(i + 1).find(same);
+  const after = state.tasks.slice(0, i).reverse().find(same);
+  return { categoryId: task.categoryId, beforeId: before ? before.id : null, afterId: after ? after.id : null };
+}
+
+function putBack(task, place) {
+  state.tasks.splice(state.tasks.indexOf(task), 1);
+  task.categoryId = place.categoryId;
+  const inColumn = id => state.tasks.findIndex(t => t.id === id && t.categoryId === place.categoryId);
+  let at = inColumn(place.beforeId);
+  if (at < 0 && inColumn(place.afterId) >= 0) at = inColumn(place.afterId) + 1;
+  if (at < 0) {
+    let last = -1;
+    state.tasks.forEach((t, i) => { if (t.categoryId === place.categoryId) last = i; });
+    at = last >= 0 ? last + 1 : state.tasks.length;
+  }
+  state.tasks.splice(at, 0, task);
+}
+
+// Everything showing a card, after an undo changed it.
+function showCardChange(task) {
+  renderBoard();
+  if (openTaskId === task.id) {
+    populateCategorySelect(taskCategory, task.categoryId);
+    updateTaskMeta(task);
+    renderChecklist(task);
+  }
+  refreshOpenNoteLinks();
+  if (searchOpen()) renderSearch({ keepIndex: true });
+}
+
+// Offered when a card changes column, not when it's reordered within one.
+// Moves of the same card in quick succession, like Ctrl+arrow pressed a few
+// times, are one step back to where it started.
+function offerMoveUndo(task, from) {
+  const prev = lastUndo;
+  if (prev && prev.taskId === task.id && prev.from && !prev.done && Date.now() - prev.at < prev.duration) {
+    from = prev.from;
+    prev.done = true;
+    prev.toast.dismiss();
+    lastUndo = null;
+  }
+  const to = task.categoryId;
+  const fromCol = columnById(from.categoryId), toCol = columnById(to);
+  if (to === from.categoryId || !fromCol || !toCol) return;
+  const offer = offerUndo(`Moved ${cardName(task)} from ${fromCol.name} to ${toCol.name}`, () => {
+    const t = taskById(task.id);
+    const back = columnById(from.categoryId);
+    if (!t || t.categoryId !== to || !back) return false;
+    putBack(t, from);
+    save();
+    showCardChange(t);
+    return `Moved ${cardName(t)} back to ${back.name}`;
+  });
+  offer.taskId = task.id;
+  offer.from = from;
+}
+
+// Offered when a card is ticked done; undoing it also puts back the ticks of
+// a checklist, which completing the card had ticked.
+function offerCompleteUndo(task, ticks) {
+  offerUndo(`Completed ${cardName(task)}`, () => {
+    const t = taskById(task.id);
+    if (!t || !t.completed) return false;
+    t.completed = false;
+    t.completedAt = null;
+    for (const item of t.items || []) if (ticks.has(item.id)) item.done = ticks.get(item.id);
+    save();
+    showCardChange(t);
+    return `Reopened ${cardName(t)}`;
+  });
 }
 
 /* ---------- Confirm dialog ---------- */
@@ -4159,6 +4282,7 @@ function createTask({ categoryId, subject, description = "", dueDate = null }) {
 }
 
 function toggleTask(task) {
+  const ticks = new Map((task.items || []).map(i => [i.id, i.done]));
   task.completed = !task.completed;
   task.completedAt = task.completed ? new Date().toISOString() : null;
   // A checklist follows its card: ticking the card ticks every item, and
@@ -4167,6 +4291,7 @@ function toggleTask(task) {
   save();
   renderBoard();
   if (openTaskId === task.id) renderChecklist(task);
+  if (task.completed) offerCompleteUndo(task, ticks);
 }
 
 function toggleImportant(task) {
@@ -4215,15 +4340,14 @@ function deleteTaskWithUndo(task) {
   deleteTask(task);
   renderBoard();
   refreshOpenNoteLinks();
-  toast(`Deleted "${snapshot.subject || "task"}"`, {
-    actionLabel: "Undo",
-    onAction: () => {
-      state.tasks.splice(idx, 0, snapshot);
-      save();
-      renderBoard();
-      refreshOpenNoteLinks();
-    }
-  });
+  offerUndo(`Deleted "${snapshot.subject || "task"}"`, () => {
+    if (taskById(snapshot.id)) return false;
+    state.tasks.splice(Math.min(idx, state.tasks.length), 0, snapshot);
+    save();
+    renderBoard();
+    refreshOpenNoteLinks();
+    return `Restored "${snapshot.subject || "task"}"`;
+  }, { duration: 5000 });
 }
 
 /* ---------- Drag-and-drop: tasks ---------- */
@@ -4302,6 +4426,7 @@ function clearDropMarkers() {
 function moveTask(taskId, newCategoryId, visualIndex) {
   const task = state.tasks.find(t => t.id === taskId);
   if (!task) return;
+  const from = cardPlace(task);
   // visualIndex comes from the rendered column, where urgent cards are pinned
   // on top in due-date order. Their array positions are therefore arbitrary and
   // useless as an anchor, so placement is resolved against the unpinned run —
@@ -4322,6 +4447,7 @@ function moveTask(taskId, newCategoryId, visualIndex) {
   }
   save();
   renderBoard();
+  if (task.categoryId !== from.categoryId) offerMoveUndo(task, from);
 }
 
 /* ---------- Drag-and-drop: columns ---------- */
@@ -4513,7 +4639,11 @@ function commitTaskEdits() {
   if (!t) return;
   t.subject = taskSubject.value.replace(/[\r\n]+/g, " ").trim().slice(0, 500);
   t.description = taskDesc.value;
-  t.categoryId = taskCategory.value;
+  if (taskCategory.value && t.categoryId !== taskCategory.value) {
+    const from = cardPlace(t);
+    t.categoryId = taskCategory.value;
+    offerMoveUndo(t, from);
+  }
   t.dueDate = taskDue.value || null;
   save();
   // Board is hidden behind the modal — re-render happens on close, not per keystroke.
@@ -4708,14 +4838,16 @@ const quickChecklistToggle = $("#quick-checklist-toggle");
 let checklistShown = false; // open for this card even while it has no items
 let quickChecklist = false;
 
+// A checklist's card is done exactly when every item is; true when that has
+// just finished it.
 function settleChecklist(task) {
   const items = task.items || [];
-  if (!items.length) return;
+  if (!items.length) return false;
   const all = items.every(i => i.done);
-  if (all === !!task.completed) return;
+  if (all === !!task.completed) return false;
   task.completed = all;
   task.completedAt = all ? new Date().toISOString() : null;
-  if (all) toast("Everything is checked, so the card is done.", { duration: 3000 });
+  return all;
 }
 
 function renderChecklist(task) {
@@ -4766,16 +4898,27 @@ function renderChecklistItem(task, item) {
 
 function toggleChecklistItem(task, item) {
   item.done = !item.done;
-  settleChecklist(task);
+  const finished = settleChecklist(task);
   save();
   renderChecklist(task);
+  if (!finished) return;
+  offerUndo("Everything is checked, so the card is done.", () => {
+    const t = taskById(task.id);
+    const it = t && (t.items || []).find(i => i.id === item.id);
+    if (!t || !t.completed || !it || !it.done) return false;
+    it.done = false;
+    settleChecklist(t);
+    save();
+    showCardChange(t);
+    return `Reopened ${cardName(t)}`;
+  });
 }
 
 function removeChecklistItem(task, item, { focusBefore = false } = {}) {
   const at = (task.items || []).indexOf(item);
   if (at < 0) return;
   task.items.splice(at, 1);
-  settleChecklist(task);
+  if (settleChecklist(task)) toast("Everything is checked, so the card is done.", { duration: 3000 });
   save();
   renderChecklist(task);
   if (focusBefore) ($$(".checklist-text", checklistItemsEl)[at - 1] || checklistAdd).focus();
@@ -5355,6 +5498,15 @@ document.addEventListener("keydown", e => {
     if (searchOpen()) { searchInput.focus(); searchInput.select(); return; }
     if (anyModalOpen()) return;
     openSearch();
+    return;
+  }
+  // Ctrl/Cmd+Z — the latest change a toast offered to undo. Not in a text
+  // field, which keeps its own undo, nor in a drawing, which has its own.
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "z") {
+    if (!state || !lastUndo || drawing || e.defaultPrevented || isTypingTarget(e.target)) return;
+    if (!$("#confirm-modal").hidden) return;
+    e.preventDefault();
+    runUndo(lastUndo, { byKey: true });
     return;
   }
   if (e.key === "Escape") {
@@ -6522,16 +6674,14 @@ function deleteNoteEntry(note, entry) {
   save();
   renderNoteEntries(note);
   if (entryIsEmpty(entry)) return; // nothing worth an undo
-  toast("Entry deleted", {
-    actionLabel: "Undo",
-    onAction: () => {
-      if (!state.notes.includes(note)) return;
-      note.entries.splice(Math.min(idx, note.entries.length), 0, entry);
-      save();
-      if (openNoteId === note.id) renderNoteEntries(note);
-      renderNotes();
-    }
-  });
+  offerUndo("Entry deleted", () => {
+    if (!state.notes.includes(note) || note.entries.some(e => e.id === entry.id)) return false;
+    note.entries.splice(Math.min(idx, note.entries.length), 0, entry);
+    save();
+    if (openNoteId === note.id) renderNoteEntries(note);
+    renderNotes();
+    return "Entry restored";
+  }, { duration: 5000 });
 }
 
 function hideNoteModal() {
@@ -6647,10 +6797,15 @@ noteArchiveBtn.addEventListener("click", () => {
   save();
   renderNotes();
   if (!searchOpen() && !notesPane.contains(document.activeElement)) restoreBoardFocus();
-  toast("Note archived", {
-    actionLabel: "Undo",
-    onAction: () => { note.archived = false; note.archivedAt = null; save(); renderNotes(); }
-  });
+  offerUndo("Note archived", () => {
+    if (!state.notes.includes(note) || !note.archived) return false;
+    note.archived = false;
+    note.archivedAt = null;
+    save();
+    renderNotes();
+    if (openNoteId === note.id) paintNoteArchived(note);
+    return "Note taken out of the archive";
+  }, { duration: 5000 });
 });
 
 $("#note-delete").addEventListener("click", async () => {
@@ -6673,14 +6828,13 @@ $("#note-delete").addEventListener("click", async () => {
   save();
   renderNotes();
   afterNoteClosed(null);
-  toast("Note deleted", {
-    actionLabel: "Undo",
-    onAction: () => {
-      state.notes.splice(Math.min(idx, state.notes.length), 0, note);
-      save();
-      renderNotes();
-    }
-  });
+  offerUndo("Note deleted", () => {
+    if (state.notes.some(x => x.id === note.id)) return false;
+    state.notes.splice(Math.min(idx, state.notes.length), 0, note);
+    save();
+    renderNotes();
+    return "Note restored";
+  }, { duration: 5000 });
 });
 
 $("#note-new-entry").addEventListener("click", addNoteEntry);
@@ -7130,10 +7284,10 @@ function deleteLinkedCards(recs) {
   save();
   renderBoard();
   const n = recs.length;
-  toast(n === 1 ? "Card deleted along with its line" : `${n} cards deleted along with their lines`, {
-    actionLabel: "Undo",
-    onAction: () => restoreLinkedCards(recs)
-  });
+  offerUndo(n === 1 ? "Card deleted along with its line" : `${n} cards deleted along with their lines`, () => {
+    restoreLinkedCards(recs);
+    return n === 1 ? "Card restored along with its line" : `${n} cards restored along with their lines`;
+  }, { duration: 5000 });
 }
 
 function resurrectLinkedCard(id) {

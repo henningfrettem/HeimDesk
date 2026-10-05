@@ -169,6 +169,12 @@ A bar along the bottom lists every keyboard shortcut.
 - Each card shows its age in days under the checkbox — `3d`, `140d`, `365d`.
   Hover for the exact creation date
 - Drag tasks between columns, or to reorder within one
+- Moving a card to another column, completing one, or deleting one shows a
+  toast saying what happened (`Moved "…" from Inbox to Done`) with **Undo**,
+  which puts the card back exactly where it was. `Ctrl+Z` does the same for
+  the latest one, even after the toast has gone, as long as you're not typing
+  in a field. It's one step, and it won't undo anything changed since (on this
+  device or another)
 - Drag a column by its grip to reorder the board
 - Double-click a column name to rename it
 
@@ -411,6 +417,7 @@ Safari, since iOS doesn't send links to home-screen apps.
 | `Enter` | Open the focused card or note; on a notes category, fold or unfold it |
 | `Space` | Mark the focused card done |
 | `Esc` | Close the topmost dialog (saving edits), then the search |
+| `Ctrl+Z` | Undo the latest move, completion or delete (outside text fields) |
 | `Ctrl+F` | Search |
 | `Space` | In a task's Preview pane, switch to Write |
 | `Ctrl+B` / `Ctrl+I` | Bold / italic, inside a task description |
