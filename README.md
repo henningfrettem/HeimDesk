@@ -366,6 +366,10 @@ any existing card gets one from the checklist button at the end of its
 toolbar. Type an item and press Enter for the next. Enter in an item moves to
 the next one, and Backspace in an empty item removes it.
 
+With a checklist, the card scrolls as one page: the items first, then the
+notes at full size below them, with the Write/Preview bar staying in sight as
+you scroll through the notes. A long list never squeezes the notes.
+
 The card is done exactly when every item is: checking the last item completes
 it, and unchecking one, or adding a new one, reopens it. Ticking the card itself
 on the board checks every item, and unticking it unchecks them all, which

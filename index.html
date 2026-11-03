@@ -1061,6 +1061,7 @@
     color: var(--ink);
     font-variation-settings: "wght" 500, "opsz" 20;
     display: block;
+    flex-shrink: 0; /* the card's content scrolls below it instead */
     resize: none;
     overflow: hidden;
     line-height: 1.25;
@@ -1069,6 +1070,15 @@
     field-sizing: content;
   }
   .task-subject-input::placeholder { color: var(--mute-2); }
+
+  /* Between the title and the footer, which stay put. */
+  .task-scroll {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
 
   .md-toolbar {
     display: flex;
@@ -1961,9 +1971,7 @@
 
   /* ---------- Checklists ---------- */
   .checklist {
-    flex: 0 1 auto;
-    min-height: 0;
-    overflow-y: auto;
+    flex: none;
     padding: 2px 26px 12px 30px;
     border-bottom: 1px solid var(--rule-soft);
   }
@@ -2025,9 +2033,17 @@
   }
   .checklist-add::placeholder { color: var(--mute); }
   .checklist-add:focus { border-style: solid; border-color: var(--accent); background: var(--card); }
-  /* Below a checklist, the description makes do with less room. */
-  .modal-panel.has-checklist .task-desc,
-  .modal-panel.has-checklist .task-preview { min-height: 90px; }
+  /* With a checklist the card scrolls as one, so a long list pushes the notes
+     down rather than squeezing them: the notes grow with their text (the
+     field's height is set as it's typed in) and the toolbar stays in sight. */
+  .modal-panel.has-checklist .md-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--card-hover);
+  }
+  .modal-panel.has-checklist .task-desc { flex: 1 0 140px; min-height: 0; overflow-y: hidden; }
+  .modal-panel.has-checklist .task-preview { flex: 1 0 auto; min-height: 140px; overflow: visible; }
   .md-checklist { margin-left: 6px; }
   .checklist-chip { display: inline-flex; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; }
   .checklist-chip.all { color: var(--ok); }
@@ -2537,33 +2553,35 @@
     </button>
     <div class="task-origin" id="task-origin" hidden></div>
     <textarea id="task-subject" class="task-subject-input" placeholder="Task subject" rows="1" maxlength="500" spellcheck="false"></textarea>
-    <div class="checklist" id="task-checklist" hidden>
-      <div class="checklist-head">
-        <span class="checklist-title">Checklist</span>
-        <span class="checklist-progress" id="checklist-progress"></span>
+    <div class="task-scroll" id="task-scroll">
+      <div class="checklist" id="task-checklist" hidden>
+        <div class="checklist-head">
+          <span class="checklist-title">Checklist</span>
+          <span class="checklist-progress" id="checklist-progress"></span>
+        </div>
+        <div class="checklist-bar"><div class="checklist-bar-fill" id="checklist-bar-fill"></div></div>
+        <ul class="checklist-items" id="checklist-items"></ul>
+        <input class="checklist-add" id="checklist-add" type="text" maxlength="300" placeholder="Add an item" autocomplete="off" aria-label="Add an item">
       </div>
-      <div class="checklist-bar"><div class="checklist-bar-fill" id="checklist-bar-fill"></div></div>
-      <ul class="checklist-items" id="checklist-items"></ul>
-      <input class="checklist-add" id="checklist-add" type="text" maxlength="300" placeholder="Add an item" autocomplete="off" aria-label="Add an item">
+      <div class="md-toolbar" id="md-toolbar" role="toolbar" aria-label="Formatting">
+        <div class="md-tabs" role="tablist">
+          <button class="md-tab active" data-mode="write" role="tab" aria-selected="true">Write</button>
+          <button class="md-tab" data-mode="preview" role="tab" aria-selected="false">Preview</button>
+        </div>
+        <div class="md-actions">
+          <button class="md-btn" data-md="bold" title="Bold (Ctrl+B)" aria-label="Bold"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z"/></svg></button>
+          <button class="md-btn" data-md="italic" title="Italic (Ctrl+I)" aria-label="Italic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="5" x2="11" y2="5"/><line x1="13" y1="19" x2="5" y2="19"/><line x1="15" y1="5" x2="9" y2="19"/></svg></button>
+          <div class="md-sep"></div>
+          <button class="md-btn" data-md="ul" title="Bulleted list" aria-label="Bulleted list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor"/></svg></button>
+          <button class="md-btn" data-md="ol" title="Numbered list" aria-label="Numbered list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="6" x2="20" y2="6"/><line x1="10" y1="12" x2="20" y2="12"/><line x1="10" y1="18" x2="20" y2="18"/><path d="M4 6h1v4" stroke-width="1.8"/><path d="M3 12h3l-3 3.5h3" stroke-width="1.8"/><path d="M3 18h2.5a1 1 0 0 1 0 2H3v-2" stroke-width="1.8" fill="none"/></svg></button>
+          <div class="md-sep"></div>
+          <button class="md-btn" data-md="image" title="Insert image" aria-label="Insert image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10.5" r="1.5"/><path d="m21 16-5-5-6 6-3-3-4 4"/></svg></button>
+        </div>
+        <button class="md-btn md-checklist" id="task-add-checklist" type="button" title="Add a checklist" aria-label="Add a checklist"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="6" height="6" rx="1.5"/><path d="m4.6 7 1.2 1.2 1.8-2"/><line x1="12" y1="7" x2="21" y2="7"/><rect x="3" y="14" width="6" height="6" rx="1.5"/><line x1="12" y1="17" x2="21" y2="17"/></svg></button>
+      </div>
+      <textarea id="task-desc" class="task-desc" placeholder="Notes, context, links... (supports **bold**, *italic*, and lists. Paste images directly.)"></textarea>
+      <div id="task-preview" class="task-preview md" tabindex="-1" hidden></div>
     </div>
-    <div class="md-toolbar" id="md-toolbar" role="toolbar" aria-label="Formatting">
-      <div class="md-tabs" role="tablist">
-        <button class="md-tab active" data-mode="write" role="tab" aria-selected="true">Write</button>
-        <button class="md-tab" data-mode="preview" role="tab" aria-selected="false">Preview</button>
-      </div>
-      <div class="md-actions">
-        <button class="md-btn" data-md="bold" title="Bold (Ctrl+B)" aria-label="Bold"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z"/></svg></button>
-        <button class="md-btn" data-md="italic" title="Italic (Ctrl+I)" aria-label="Italic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="5" x2="11" y2="5"/><line x1="13" y1="19" x2="5" y2="19"/><line x1="15" y1="5" x2="9" y2="19"/></svg></button>
-        <div class="md-sep"></div>
-        <button class="md-btn" data-md="ul" title="Bulleted list" aria-label="Bulleted list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor"/></svg></button>
-        <button class="md-btn" data-md="ol" title="Numbered list" aria-label="Numbered list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="6" x2="20" y2="6"/><line x1="10" y1="12" x2="20" y2="12"/><line x1="10" y1="18" x2="20" y2="18"/><path d="M4 6h1v4" stroke-width="1.8"/><path d="M3 12h3l-3 3.5h3" stroke-width="1.8"/><path d="M3 18h2.5a1 1 0 0 1 0 2H3v-2" stroke-width="1.8" fill="none"/></svg></button>
-        <div class="md-sep"></div>
-        <button class="md-btn" data-md="image" title="Insert image" aria-label="Insert image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10.5" r="1.5"/><path d="m21 16-5-5-6 6-3-3-4 4"/></svg></button>
-      </div>
-      <button class="md-btn md-checklist" id="task-add-checklist" type="button" title="Add a checklist" aria-label="Add a checklist"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="6" height="6" rx="1.5"/><path d="m4.6 7 1.2 1.2 1.8-2"/><line x1="12" y1="7" x2="21" y2="7"/><rect x="3" y="14" width="6" height="6" rx="1.5"/><line x1="12" y1="17" x2="21" y2="17"/></svg></button>
-    </div>
-    <textarea id="task-desc" class="task-desc" placeholder="Notes, context, links... (supports **bold**, *italic*, and lists. Paste images directly.)"></textarea>
-    <div id="task-preview" class="task-preview md" tabindex="-1" hidden></div>
     <footer class="task-footer">
       <div class="task-footer-controls">
         <select id="task-category" class="select"></select>
@@ -3346,6 +3364,7 @@ function showRemoteChanges(changed) {
     if (active !== taskSubject) { taskSubject.value = task.subject || ""; autoResizeSubject(); }
     if (active !== taskDesc) {
       taskDesc.value = task.description || "";
+      sizeTaskDesc();
       if (taskMode === "preview") renderTaskPreview();
     }
     if (active !== taskDue) taskDue.value = task.dueDate || "";
@@ -4474,11 +4493,15 @@ const taskMeta = $("#task-meta");
 const taskDeleteBtn = $("#task-delete");
 
 const taskPreview = $("#task-preview");
+const taskScroll = $("#task-scroll");
 const mdToolbar = $("#md-toolbar");
 let taskMode = "write";
 
 function setTaskMode(mode, { focus = true } = {}) {
   taskMode = mode;
+  // Swapping the text for its preview changes the card's height; where it
+  // was scrolled to stays put.
+  const y = taskScroll.scrollTop;
   $$(".md-tab").forEach(t => {
     const on = t.dataset.mode === mode;
     t.classList.toggle("active", on);
@@ -4491,13 +4514,15 @@ function setTaskMode(mode, { focus = true } = {}) {
     renderTaskPreview();
     // Without this, focus stays on the card behind the modal and Space would
     // complete the task instead of switching to Write.
-    if (focus) setTimeout(() => taskPreview.focus(), 10);
+    if (focus) setTimeout(() => taskPreview.focus({ preventScroll: true }), 10);
   } else {
     taskPreview.hidden = true;
     taskDesc.hidden = false;
-    if (focus && touchUI.matches) taskDesc.focus();
-    if (focus) setTimeout(() => taskDesc.focus(), 10);
+    sizeTaskDesc();
+    if (focus && touchUI.matches) taskDesc.focus({ preventScroll: true });
+    if (focus) setTimeout(() => taskDesc.focus({ preventScroll: true }), 10);
   }
+  taskScroll.scrollTop = y;
 }
 
 async function renderTaskPreview() {
@@ -4544,6 +4569,7 @@ function openTaskModal(task, { checklist = false } = {}) {
   updateModalStar(task);
   updateModalPrivate(task);
   taskModal.hidden = false;
+  taskScroll.scrollTop = 0;
   const hasContent = !!(task.description || "").trim();
   // On a touch screen an empty description isn't focused, since the keyboard
   // would cover the card; the card behind lets go of focus instead.
@@ -4654,12 +4680,31 @@ function autoResizeSubject() {
   taskSubject.style.height = "auto";
   taskSubject.style.height = taskSubject.scrollHeight + "px";
 }
+
+// Below a checklist the notes field is as tall as its text, since the card
+// scrolls rather than the field. Measured with the field collapsed, so it's
+// the text's height and not the room around it.
+function sizeTaskDesc() {
+  const y = taskScroll.scrollTop; // before anything shrinks and clamps it
+  taskDesc.style.minHeight = "";
+  if (!taskModal.hidden && !taskDesc.hidden && taskPanel.classList.contains("has-checklist")) {
+    taskDesc.style.flex = "none";
+    taskDesc.style.height = "0";
+    taskDesc.style.minHeight = "0";
+    const h = taskDesc.scrollHeight;
+    taskDesc.style.flex = taskDesc.style.height = "";
+    taskDesc.style.minHeight = h + "px";
+  }
+  taskScroll.scrollTop = y;
+}
+addEventListener("resize", () => { if (!taskModal.hidden) sizeTaskDesc(); });
 taskSubject.addEventListener("input", saveTaskEdits);
 taskSubject.addEventListener("input", autoResizeSubject);
 taskSubject.addEventListener("keydown", e => {
   if (e.key === "Enter") e.preventDefault();
 });
 taskDesc.addEventListener("input", saveTaskEdits);
+taskDesc.addEventListener("input", sizeTaskDesc);
 taskCategory.addEventListener("change", saveTaskEdits);
 taskDue.addEventListener("change", saveTaskEdits);
 taskDeleteBtn.addEventListener("click", async () => {
@@ -4856,13 +4901,14 @@ function renderChecklist(task) {
   checklistEl.hidden = !on;
   taskPanel.classList.toggle("has-checklist", on);
   $("#task-add-checklist").hidden = on || !checklistsAvailable;
-  const y = checklistEl.scrollTop;
+  const y = taskScroll.scrollTop;
   checklistItemsEl.innerHTML = "";
   for (const item of items) checklistItemsEl.append(renderChecklistItem(task, item));
   const done = items.filter(i => i.done).length;
   $("#checklist-progress").textContent = items.length ? `${done} of ${items.length}` : "";
   $("#checklist-bar-fill").style.width = items.length ? (100 * done / items.length) + "%" : "0";
-  checklistEl.scrollTop = y;
+  taskScroll.scrollTop = y;
+  sizeTaskDesc();
 }
 
 function renderChecklistItem(task, item) {
@@ -4939,10 +4985,8 @@ function addTypedChecklistItem() {
 checklistAdd.addEventListener("keydown", e => {
   if (e.key !== "Enter" || e.isComposing) return;
   e.preventDefault();
-  if (addTypedChecklistItem()) {
-    const last = checklistItemsEl.lastElementChild;
-    if (last) last.scrollIntoView({ block: "nearest" });
-  }
+  // The field for the next item stays in sight as the list grows.
+  if (addTypedChecklistItem()) checklistAdd.scrollIntoView({ block: "nearest" });
 });
 $("#task-add-checklist").addEventListener("click", () => {
   const task = openTaskId && state.tasks.find(t => t.id === openTaskId);
