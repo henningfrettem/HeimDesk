@@ -1,17 +1,17 @@
-/* canvas.js — a home-grown drawing canvas for the Todo notes.
+/* canvas.js — a home-grown drawing canvas for HeimDesk's notes.
  *
  * A classic script rather than an ES module, because modules are refused on
  * file:// and the app is opened straight off disk. It exposes one global,
- * window.TodoCanvas, and knows nothing about Supabase or notes: it is handed
+ * window.HeimDeskCanvas, and knows nothing about Supabase or notes: it is handed
  * a drawing, lets you edit it, and reports every finished change through
  * onChange. Saving is the caller's business.
  *
- *   const c = TodoCanvas.create(element, { data, onChange(data) {}, startTyping });
+ *   const c = HeimDeskCanvas.create(element, { data, onChange(data) {}, startTyping });
  *   c.getData(); c.setData(data); c.fit(); c.tidyAll(); c.refresh();
  *   c.flush();    // finish any typing in progress, so getData() has it
  *   c.destroy();
  *   c.exportSVG() // a self-contained SVG for other apps: real text, no HTML
- *   TodoCanvas.previewMarkup(data)   // a still picture of a drawing, as SVG markup
+ *   HeimDeskCanvas.previewMarkup(data)   // a still picture of a drawing, as SVG markup
  *
  * startTyping: a new mind map whose central topic is empty opens with the
  * cursor already in it.
@@ -2382,5 +2382,5 @@ function previewMarkup(data) {
   }
 }
 
-window.TodoCanvas = { create, normalize, previewMarkup, COLORS: COLORS.map(c => Object.assign({}, c)) };
+window.HeimDeskCanvas = { create, normalize, previewMarkup, COLORS: COLORS.map(c => Object.assign({}, c)) };
 })();

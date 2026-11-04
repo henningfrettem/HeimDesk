@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
 <meta name="theme-color" content="#faf8f3">
-<meta name="application-name" content="Todo">
+<meta name="application-name" content="HeimDesk">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<title>Todo</title>
+<title>HeimDesk</title>
 <script>
 (function () {
   const iconSvg =
@@ -29,8 +29,8 @@
   manifestLink.rel = "manifest";
   if (location.protocol === "file:") {
     const manifest = {
-      name: "Todo",
-      short_name: "Todo",
+      name: "HeimDesk",
+      short_name: "HeimDesk",
       display: "standalone",
       background_color: "#faf8f3",
       theme_color: "#faf8f3",
@@ -2379,7 +2379,7 @@
 <div id="welcome" class="welcome" hidden>
   <div class="welcome-content">
     <div class="welcome-eyebrow">A quiet place for lists</div>
-    <h1 class="welcome-title">Todo<em>.</em></h1>
+    <h1 class="welcome-title">HeimDesk<em>.</em></h1>
 
     <div id="setup-stage" hidden>
       <p class="welcome-sub">
@@ -2423,7 +2423,7 @@
 <div id="app" hidden>
   <header class="topbar">
     <div class="topbar-left">
-      <div class="brand">Todo</div>
+      <div class="brand">HeimDesk</div>
       <div style="position:relative" id="folder-menu-wrap">
         <button id="folder-menu" class="folder-menu" aria-haspopup="true">
           <span class="folder-menu-label" id="folder-menu-label">Personal</span>
@@ -2773,7 +2773,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
 <script>
 /* ==================================================================
-   Todo — single-file todo board backed by Supabase
+   HeimDesk — a board, notes and drawings in one page, backed by Supabase
    ================================================================== */
 (() => {
 "use strict";
@@ -2831,12 +2831,15 @@ const fmtDate = iso => {
 // Connection details live in localStorage rather than a config file: this is a
 // single HTML page opened straight off disk, and a sibling ES module would be
 // refused by the CORS check that applies to module scripts on file://.
+// Like the other localStorage keys, it keeps the app's old name, Todo, so
+// nothing already stored is lost.
 const CFG_KEY = "todo.supabase.config";
 
 // config.local.js wins over anything typed into the setup screen, so a filled-in
 // file survives cleared browser storage and moves with the folder.
 function fileConfig() {
-  const c = window.TODO_CONFIG;
+  // A config.local.js from before the rename sets TODO_CONFIG.
+  const c = window.HEIMDESK_CONFIG || window.TODO_CONFIG;
   if (!c || !c.url || !c.key) return null;
   if (!/^https:\/\/[^\s]+$/.test(c.url) || /YOUR-PROJECT/i.test(c.url)) return null;
   return c;
@@ -2844,7 +2847,7 @@ function fileConfig() {
 
 function loadConfig() {
   const f = fileConfig();
-  if (f) return { url: f.url, key: f.key, schema: f.schema || "todo" };
+  if (f) return { url: f.url, key: f.key, schema: f.schema || "heimdesk" };
   try { return JSON.parse(localStorage.getItem(CFG_KEY) || "null"); } catch { return null; }
 }
 function saveConfig(cfg) { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
@@ -2861,7 +2864,7 @@ const touchUI = matchMedia("(hover: none)");
 
 function makeClient(cfg) {
   return supabase.createClient(cfg.url, cfg.key, {
-    db: { schema: cfg.schema || "todo" },
+    db: { schema: cfg.schema || "heimdesk" },
     // PKCE: a Google sign-in comes back as a one-time code that only this
     // browser can redeem, rather than as tokens in the address bar.
     auth: { persistSession: true, autoRefreshToken: true, flowType: "pkce" },
@@ -2887,14 +2890,30 @@ async function fetchPastClockSkew(input, init) {
 
 /* ---------- Images ---------- */
 // Markdown stores "sb:<filename>"; the object itself lives at <uid>/<filename>
-// in a private bucket, reachable only through a short-lived signed URL.
+// in a private bucket, reachable only through a short-lived signed URL. The
+// bucket keeps the app's old name: renaming it would mean copying every file.
 const IMAGE_BUCKET = "todo-images";
 const signedUrlCache = new Map();
 
-async function uploadImage(blob, ext) {
-  const name = `${uuid()}.${ext}`;
+// What the bucket takes (supabase/schema.sql sets the same limits there):
+// image types a browser shows without running anything, so no SVG, and up to
+// 10 MB, which fits a full-size phone photo or screenshot. The file is named
+// from its checked type, never from its own name.
+const IMAGE_TYPES = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
+const IMAGE_MAX_MB = 10;
+function imageProblem(blob) {
+  if (!IMAGE_TYPES[blob.type]) return "only PNG, JPEG, GIF and WebP images can be added";
+  const mb = blob.size / (1024 * 1024);
+  if (mb > IMAGE_MAX_MB) return `an image can be at most ${IMAGE_MAX_MB} MB, and this one is ${mb.toFixed(1)} MB`;
+  return null;
+}
+
+async function uploadImage(blob) {
+  const problem = imageProblem(blob);
+  if (problem) throw new Error(problem);
+  const name = `${uuid()}.${IMAGE_TYPES[blob.type]}`;
   const { error } = await sb.storage.from(IMAGE_BUCKET)
-    .upload(`${userId}/${name}`, blob, { contentType: blob.type || "image/png" });
+    .upload(`${userId}/${name}`, blob, { contentType: blob.type });
   if (error) throw new Error(error.message);
   return `sb:${name}`;
 }
@@ -3436,7 +3455,7 @@ const checkRemoteEvents = debounce(() => {
 
 function startLive(schema) {
   if (liveChannel || !sb || typeof sb.channel !== "function") return;
-  liveChannel = sb.channel("todo-changes")
+  liveChannel = sb.channel("heimdesk-changes")
     .on("postgres_changes", { event: "*", schema }, onRemoteEvent)
     .subscribe(status => {
       liveStatus = status;
@@ -4780,10 +4799,11 @@ function pickAndInsertImage() {
 imageFileInput.addEventListener("change", async () => {
   const f = imageFileInput.files && imageFileInput.files[0];
   if (!f) return;
-  const ext = (f.name.split(".").pop() || "png").toLowerCase();
+  const problem = imageProblem(f);
+  if (problem) return toast("Couldn't add image: " + problem);
   try {
     toast("Uploading image\u2026", { duration: 1500 });
-    const ref = await uploadImage(f, ext);
+    const ref = await uploadImage(f);
     insertAtCursor(taskDesc, `\n![${f.name.replace(/\.[^.]+$/, "")}](${ref})\n`);
   } catch (e) {
     toast("Couldn't add image: " + (e.message || e));
@@ -4805,10 +4825,11 @@ taskDesc.addEventListener("paste", async e => {
   if (!imgItem) return;
   e.preventDefault();
   const blob = imgItem.getAsFile();
-  const ext = (blob.type.split("/")[1] || "png").split(";")[0];
+  const problem = imageProblem(blob);
+  if (problem) return toast("Couldn't upload image: " + problem);
   try {
     toast("Uploading image\u2026", { duration: 1500 });
-    const ref = await uploadImage(blob, ext);
+    const ref = await uploadImage(blob);
     insertAtCursor(taskDesc, `\n![pasted image](${ref})\n`);
   } catch (err) {
     toast("Couldn't upload image: " + (err.message || err));
@@ -5166,7 +5187,7 @@ function exportBoard() {
   const stamp = new Date().toISOString().slice(0, 10);
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
-  const a = el("a", { href: url, download: `todos-${stamp}.json` });
+  const a = el("a", { href: url, download: `heimdesk-${stamp}.json` });
   document.body.append(a);
   a.click();
   a.remove();
@@ -6633,16 +6654,16 @@ function handleEntryPaste(e, entry, body) {
 // and the placeholder becomes a Storage reference when the upload lands,
 // wherever the entry is by then, open or not.
 async function insertNoteImage(file, entry, body) {
+  const problem = imageProblem(file);
+  if (problem) return toast("Couldn't add image: " + problem);
   const token = uuid();
   const blobUrl = URL.createObjectURL(file);
   pendingUploads.set(token, blobUrl);
   if (document.activeElement !== body) body.focus();
   document.execCommand("insertHTML", false, `<img data-pending="${token}" src="${blobUrl}" alt="">`);
   commitEntry(entry, body);
-  const ext = (((file.type || "").split("/")[1] || "png").split(";")[0]
-    .replace("jpeg", "jpg").replace(/[^a-z0-9]/gi, "")) || "png";
   try {
-    const ref = await uploadImage(file, ext);
+    const ref = await uploadImage(file);
     const name = ref.slice(3);
     // This session already has the pixels; no need to fetch them back.
     signedUrlCache.set(ref, { url: blobUrl, expires: Infinity });
@@ -6681,7 +6702,7 @@ function addNoteEntry(kind) {
   if (kind !== "text" && !drawingsReady()) return;
   const entry = {
     id: uuid(),
-    body: kind === "text" ? "" : JSON.stringify(TodoCanvas.normalize({ type: kind })),
+    body: kind === "text" ? "" : JSON.stringify(HeimDeskCanvas.normalize({ type: kind })),
     kind,
     createdAt: new Date().toISOString()
   };
@@ -7657,7 +7678,7 @@ function entryIsEmpty(entry) {
 }
 
 function drawingsReady() {
-  if (!window.TodoCanvas) {
+  if (!window.HeimDeskCanvas) {
     toast("Diagrams and mind maps need canvas.js, next to index.html.");
     return false;
   }
@@ -7677,10 +7698,10 @@ function drawingPreview(note, entry) {
     onkeydown: e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } }
   });
   let markup = "";
-  if (window.TodoCanvas) {
+  if (window.HeimDeskCanvas) {
     if (previewCache.has(entry.body)) markup = previewCache.get(entry.body);
     else {
-      try { markup = TodoCanvas.previewMarkup(drawingData(entry)); } catch (err) { console.error(err); }
+      try { markup = HeimDeskCanvas.previewMarkup(drawingData(entry)); } catch (err) { console.error(err); }
       if (previewCache.size > 200) previewCache.clear();
       previewCache.set(entry.body, markup);
     }
@@ -7690,7 +7711,7 @@ function drawingPreview(note, entry) {
   if (markup && !entryIsEmpty(entry)) box.innerHTML = markup;
   else {
     box.append(el("div", { class: "entry-drawing-empty" },
-      !window.TodoCanvas ? "Diagrams and mind maps need canvas.js, next to index.html."
+      !window.HeimDeskCanvas ? "Diagrams and mind maps need canvas.js, next to index.html."
         : entry.kind === "mindmap" ? "An empty mind map. Click to start it." : "An empty diagram. Click to draw."));
   }
   box.append(el("span", { class: "entry-drawing-hint" }, "Click to edit"));
@@ -7704,7 +7725,7 @@ function setNoteInert(on) {
 }
 
 function openDrawing(note, entry, { startTyping = false } = {}) {
-  if (!window.TodoCanvas) { drawingsReady(); return; }
+  if (!window.HeimDeskCanvas) { drawingsReady(); return; }
   closeDrawing();
   flushNoteEdits(note);
   hideItemOpen();
@@ -7713,7 +7734,7 @@ function openDrawing(note, entry, { startTyping = false } = {}) {
   $("#note-drawing-when").textContent = entryStamp(entry.createdAt);
   noteDrawing.hidden = false;
   setNoteInert(true);
-  const canvas = TodoCanvas.create(noteDrawingStage, {
+  const canvas = HeimDeskCanvas.create(noteDrawingStage, {
     data: drawingData(entry),
     startTyping,
     // Every finished change is saved the same way typed text is.
@@ -7943,7 +7964,7 @@ $("#setup-form").addEventListener("submit", e => {
   const cfg = {
     url: $("#setup-url").value.trim().replace(/\/+$/, ""),
     key: $("#setup-key").value.trim(),
-    schema: "todo"
+    schema: "heimdesk"
   };
   if (!/^https:\/\/[^\s]+$/.test(cfg.url)) return welcomeFail("That doesn't look like a project URL.");
   saveConfig(cfg);
@@ -7973,7 +7994,7 @@ async function startApp(user) {
     welcome.hidden = true;
     appRoot.hidden = false;
     fileName.textContent = user.email || "signed in";
-    startLive((loadConfig() || {}).schema || "todo");
+    startLive((loadConfig() || {}).schema || "heimdesk");
     openPendingLink();
     renderBoard();
     updateFolderLabel();

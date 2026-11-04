@@ -6,3 +6,4 @@ todos.json
 assets/
 supabase-check.html
 dist/
+.security/

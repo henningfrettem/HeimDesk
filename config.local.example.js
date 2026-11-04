@@ -9,7 +9,7 @@
 // If the file is missing, or the URL is still a placeholder, the app simply
 // asks for these on screen instead. Nothing breaks.
 
-window.TODO_CONFIG = {
+window.HEIMDESK_CONFIG = {
   // Supabase → Settings → API
   url: "https://YOUR-PROJECT.supabase.co",
   key: "sb_publishable_...",

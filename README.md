@@ -1,6 +1,7 @@
-# Todo
+# HeimDesk
 
-A single-file todo board with a notes pane, backed by Supabase. The whole app is
+A board of cards, a notes pane and drawings, in a single page backed by
+Supabase. It was called Todo until it outgrew the name. The whole app is
 `index.html`, plus `canvas.js` for drawings, served as a static site (on Vercel,
 for instance) and installable as an app. You sign in with Google.
 
@@ -124,20 +125,50 @@ switched off too, unless other apps on the same Supabase project use it.
 ## Setting up a fresh project
 
 1. Run [`supabase/schema.sql`](supabase/schema.sql) in the Supabase SQL Editor.
-   It creates a `todo` schema, six tables, row-level security, and a private
-   `todo-images` bucket. It is safe to re-run, and re-running it is also how an
-   existing project picks up tables added later, such as the notes tables.
-   Until those exist the board works as usual and the notes pane says what to
-   run.
-2. Add `todo` under **Settings → API → Exposed schemas**. PostgREST only serves
-   schemas listed there, and without it every request comes back `404`.
-3. Create your user under **Authentication → Users**, with the email address of
+   It creates:
+   - a `heimdesk` schema with seven tables;
+   - row-level security and grants for signed-in users only;
+   - a private `todo-images` bucket with upload limits.
+
+   It runs as one transaction, so it either does everything or nothing. It is
+   safe to re-run, and re-running it is also how an existing project picks up
+   later changes.
+2. Add `heimdesk` under **Settings → API → Exposed schemas**. PostgREST only
+   serves schemas listed there, and without it every request fails.
+3. Run [`supabase/tests/rls_isolation.sql`](supabase/tests/rls_isolation.sql)
+   the same way. It checks that no user can reach another's data (see *Your
+   data*), and ends with `RLS TEST PASSED` or says which check failed.
+4. Create your user under **Authentication → Users**, with the email address of
    the Google account you'll sign in with, and turn **off** *Allow new users to
    sign up*. Then set up Google sign-in (*Signing in with Google*, above).
 
-Everything lives in a dedicated `todo` schema so one Supabase instance can host
-several small projects side by side. Storage buckets are global to the instance,
-hence the `todo-` prefix on the bucket and on its policies.
+Everything lives in a dedicated `heimdesk` schema, so one Supabase instance can
+host several small projects side by side. Storage buckets are global to the
+instance, hence the prefix on the bucket and on its policies. The bucket keeps
+the app's old name, `todo-images`, since renaming a bucket means copying every
+file in it.
+
+### Upgrading from the `todo` schema
+
+Before the rename, the app lived in a schema called `todo`. `supabase/schema.sql`
+moves it, in order:
+
+1. It renames the schema to `heimdesk`. Every row, id, policy and index stays
+   as it is.
+2. It locks the links between tables to their owner.
+3. It tightens the grants and sets the bucket's limits.
+4. It checks the result and shows a row count per table.
+
+If anything fails, nothing has changed. The deployed app reads its schema from
+the `SUPABASE_SCHEMA` setting, so the switch goes in this order:
+
+1. Close the app everywhere.
+2. Run `schema.sql`.
+3. Swap `todo` for `heimdesk` under *Exposed schemas*.
+4. Deploy with `SUPABASE_SCHEMA` set to `heimdesk`.
+
+Between running the script and the new deploy, the old app can't reach its
+data. It saves nothing in that time and loses nothing.
 
 `migrate.html` is the one-shot importer that moved the original `todos.json`
 into Supabase. It is kept because it documents the field mapping and would be
@@ -209,6 +240,11 @@ private `todo-images` bucket under your user id, and the markdown records it as
 `![alt](sb:<uuid>.png)`. Display goes through a one-hour signed URL cached in
 memory, so opening the same card repeatedly costs one round trip rather than one
 per view.
+
+An image can be PNG, JPEG, GIF or WebP, up to 10 MB. That's enough for a
+full-size phone photo or screenshot. Anything else is turned away with a
+message before it uploads, and the bucket enforces the same limits. SVG isn't
+accepted, since it can carry script.
 
 **Private cards and columns**
 
@@ -486,9 +522,30 @@ after a moment.
 ## Your data
 
 Everything lives in your Supabase project, under your user id, behind row-level
-security. Every policy keys off `auth.uid()`, which is `NULL` for an
-unauthenticated caller and therefore matches no row and permits no insert. That
-is why the publishable key being public is not a problem.
+security. That is why the publishable key being public is not a problem. Each
+user is walled off from every other in four ways:
+
+- **One policy per table.** A signed-in user reads and writes only rows whose
+  `user_id` is theirs, and can't make a row anyone else's. Saving a row with
+  someone else's id fails instead of taking it over.
+- **Links locked to their owner.** A row points at its parent through the
+  owner as well, `(parent_id, user_id)`. So no one can add a card to someone
+  else's column, or an item to their card, even knowing its id.
+- **Only what the app needs.** Signed-in users can read, add, change and delete
+  rows, and nothing else, such as emptying a table. Signed out, the API
+  answers nothing at all.
+- **Images under the owner's id.** They sit in a folder named after their
+  owner's id, and the bucket's policies check that folder.
+
+`supabase/tests/rls_isolation.sql` proves all of this against the real
+database:
+
+- It makes two throwaway users, and has one try everything against the
+  other's data.
+- It checks the policies, grants, keys and bucket settings.
+- It then undoes everything it made.
+
+Run it after any change to the schema.
 
 Nothing in this repo contains your data or your credentials.
 
@@ -497,7 +554,7 @@ app. Keeping them as a cold backup costs nothing.
 
 ## Data model
 
-Seven tables in the `todo` schema. Columns are snake_case in Postgres and
+Seven tables in the `heimdesk` schema. Columns are snake_case in Postgres and
 camelCase in the app; the mapping happens in one place on load and one on save.
 
 ```

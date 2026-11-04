@@ -20,3 +20,10 @@ config.local.js
 
 # The hosted site, built by deploy/build.js
 dist/
+
+# Security audit approvals, reports and settings (see scripts/security/gate.mjs).
+# Never committed: the repo is public, and a report is a map of weaknesses.
+.security/
+
+# Personal notes and checklists, which may name the live address.
+*.local.md

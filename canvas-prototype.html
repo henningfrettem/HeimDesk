@@ -140,7 +140,7 @@
   const write = (key, v) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) {} };
 
   let mode = localStorage.getItem(MODE_KEY) === "mindmap" ? "mindmap" : "diagram";
-  const canvas = TodoCanvas.create(document.getElementById("stage"), {
+  const canvas = HeimDeskCanvas.create(document.getElementById("stage"), {
     data: { type: mode },
     onChange(data) { write(KEYS[mode], data); }
   });

@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "Todo",
-  "short_name": "Todo",
+  "name": "HeimDesk",
+  "short_name": "HeimDesk",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

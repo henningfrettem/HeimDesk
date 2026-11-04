@@ -69,6 +69,6 @@ for (const f of FILES) {
 }
 fs.writeFileSync(path.join(OUT, "config.local.js"),
   "// Written by deploy/build.js from the Vercel project's environment variables.\n"
-  + "window.TODO_CONFIG = " + JSON.stringify({ url, key, schema }, null, 2) + ";\n");
+  + "window.HEIMDESK_CONFIG = " + JSON.stringify({ url, key, schema }, null, 2) + ";\n");
 
 console.log("build: " + (FILES.length + 1) + " files in dist/ for " + url);
