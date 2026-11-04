@@ -552,6 +552,63 @@ Nothing in this repo contains your data or your credentials.
 The original `todos.json` and `assets/` are gitignored and no longer read by the
 app. Keeping them as a cold backup costs nothing.
 
+## Security checks
+
+Every push to `main` deploys, and the repository is public. So nothing is
+committed, pushed or deployed until a security audit has passed it. The policy
+it audits against is [`security/GUIDELINES.md`](security/GUIDELINES.md).
+
+- **Per change.** The `security-auditor` agent (`.claude/agents/`) audits
+  exactly what's staged:
+  - fixed checks for secrets, forbidden files and this deployment's own
+    details;
+  - then a strict review against the guidelines, the current OWASP Top 10 and
+    ASVS, and Supabase's guidance.
+
+  Only its PASS records an approval for that staged content.
+- **The git hooks** refuse a commit whose content hasn't been approved, and
+  refuse to push any commit that wasn't. Change one byte after the audit and
+  it has to be audited again. Install them once per clone:
+
+  ```bash
+  node scripts/security/gate.mjs init
+  ```
+
+  That copies the templates in `.githooks/` into `.git/hooks`, outside the
+  working tree. The hooks run `gate.mjs` as it was last committed, so an edit
+  to the gate takes effect only once it has been audited and committed.
+
+- **Monthly.** Every 30 days the `security-full-scan` agent, on the most
+  capable model, reviews the whole app. It brings the guidelines up to date
+  with current guidance, checks the bundled library for advisories, and
+  checks the live site read-only. It also lists what to confirm in the
+  dashboards. Once it falls due, sessions open with a reminder. A week after
+  that, the gate holds all commits until it has run.
+- **In Claude Code**, `.claude/settings.json` adds the reminder and a guard,
+  both run from the committed gate. The guard:
+  - stops anyone from skipping the hooks (`--no-verify`, changing
+    `core.hooksPath`, an alias);
+  - keeps shell commands out of `.git` and `.security`, and edits out of the
+    settings;
+  - lets only the auditors record approvals, and keeps the auditors
+    read-only.
+
+  What a local gate can and can't stop is set out in the guidelines, under
+  "The gate's limits".
+
+`node scripts/security/gate.mjs status` shows:
+
+- what's staged;
+- whether it's approved;
+- when the next full scan is due.
+
+The approvals, the reports and the scan dates stay on your machine, in
+`.security/`, which is gitignored: a report is a map of weaknesses. The same
+goes for `.security/config.json`, which holds:
+
+- the live address the full scan checks;
+- strings the fixed checks keep out of the repo, such as the domain.
+
 ## Data model
 
 Seven tables in the `heimdesk` schema. Columns are snake_case in Postgres and

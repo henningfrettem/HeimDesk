@@ -1,0 +1,13 @@
+#!/bin/sh
+# HeimDesk security gate: nothing is committed that the security auditor hasn't approved.
+#
+# `node scripts/security/gate.mjs init` installs this in .git/hooks, out of
+# the working tree. It runs the gate as last committed, and so already
+# audited: an uncommitted edit to the gate can't weaken the check on its own
+# commit. (Before the gate's first commit there's no committed copy, so that
+# one commit is checked by the working tree's.)
+root="$(git rev-parse --show-toplevel)" || exit 1
+gate="$(git rev-parse --absolute-git-dir)/heimdesk-gate-$$.mjs"
+trap 'rm -f "$gate"' EXIT
+git show HEAD:scripts/security/gate.mjs > "$gate" 2>/dev/null || cp "$root/scripts/security/gate.mjs" "$gate" || exit 1
+HEIMDESK_GATE_ROOT="$root" node "$gate" pre-commit
