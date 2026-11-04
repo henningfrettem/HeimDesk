@@ -7,7 +7,7 @@
 //
 //   SUPABASE_URL              https://<project>.supabase.co
 //   SUPABASE_PUBLISHABLE_KEY  the publishable (or legacy anon) key
-//   SUPABASE_SCHEMA           optional, "todo" by default
+//   SUPABASE_SCHEMA           optional, "heimdesk" by default
 //
 // The URL and key are public by design: every visitor's browser receives
 // them, and the database's row-level security is what keeps data private. The
@@ -48,7 +48,7 @@ function jwtRole(key) {
 
 const url = (process.env.SUPABASE_URL || "").trim().replace(/\/+$/, "");
 const key = (process.env.SUPABASE_PUBLISHABLE_KEY || "").trim();
-const schema = (process.env.SUPABASE_SCHEMA || "todo").trim();
+const schema = (process.env.SUPABASE_SCHEMA || "heimdesk").trim();
 
 if (!url || !key) fail("set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY on the Vercel project.");
 if (!/^https:\/\/[^\s/]+$/.test(url)) fail("SUPABASE_URL should look like https://<project>.supabase.co");
@@ -58,7 +58,7 @@ if (key.startsWith("sb_secret_") || jwtRole(key) === "service_role") {
 if (!key.startsWith("sb_publishable_") && jwtRole(key) !== "anon") {
   fail("SUPABASE_PUBLISHABLE_KEY doesn't look like a publishable key (sb_publishable_...).");
 }
-if (!/^[a-z_][a-z0-9_]*$/.test(schema)) fail("SUPABASE_SCHEMA should be a plain schema name, like todo.");
+if (!/^[a-z_][a-z0-9_]*$/.test(schema)) fail("SUPABASE_SCHEMA should be a plain schema name, like heimdesk.");
 
 fs.rmSync(OUT, { recursive: true, force: true });
 for (const f of FILES) {

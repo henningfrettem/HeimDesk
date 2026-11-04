@@ -97,7 +97,7 @@ function client() {
   const url = $("#url").value.trim().replace(/\/+$/, "");
   const key = $("#key").value.trim();
   if (!url || !key) { log("Fill in the project URL and key first.", "err"); return null; }
-  return supabase.createClient(url, key, { db: { schema: "todo" } });
+  return supabase.createClient(url, key, { db: { schema: "heimdesk" } });
 }
 
 $("#btn-login").addEventListener("click", async () => {

@@ -72,7 +72,7 @@ files, by name and nothing else, into `dist/`, and writes the site's
 | --- | --- |
 | `SUPABASE_URL` | `https://<project>.supabase.co` |
 | `SUPABASE_PUBLISHABLE_KEY` | the publishable key, `sb_publishable_…` |
-| `SUPABASE_SCHEMA` | optional, `todo` by default |
+| `SUPABASE_SCHEMA` | optional, `heimdesk` by default |
 
 These two are public by design: every visitor's browser receives them, and
 row-level security is what keeps the data private. The build refuses a secret

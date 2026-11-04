@@ -15,5 +15,5 @@ window.HEIMDESK_CONFIG = {
   key: "sb_publishable_...",
 
   // Postgres schema this app owns. Must be listed under Exposed schemas.
-  schema: "todo"
+  schema: "heimdesk"
 };
