@@ -169,11 +169,16 @@ begin
   end loop;
   checks := checks + 2;
 
+  -- Each attempt below counts as refused only when the policies refuse it
+  -- (insufficient_privilege) or the links to the owner do
+  -- (foreign_key_violation). Any other error stops the test with that error,
+  -- so a check can't pass by failing for some unrelated reason.
+
   -- Make a row that belongs to A.
   ok := false;
   begin
     insert into heimdesk.folders (id, user_id, name) values (gen_random_uuid(), a, 'planted');
-  exception when others then ok := true;
+  exception when insufficient_privilege or foreign_key_violation then ok := true;
   end;
   if not ok then raise exception 'RLS TEST FAILED: B can make a row that belongs to A'; end if;
 
@@ -181,7 +186,7 @@ begin
   ok := false;
   begin
     update heimdesk.folders set user_id = a where id = fb;
-  exception when others then ok := true;
+  exception when insufficient_privilege or foreign_key_violation then ok := true;
   end;
   if not ok then raise exception 'RLS TEST FAILED: B can give a row to A'; end if;
 
@@ -191,7 +196,7 @@ begin
     insert into heimdesk.tasks (id, folder_id, category_id, subject) values (ta, fb, cb, 'taken')
       on conflict (id) do update set subject = excluded.subject, folder_id = excluded.folder_id,
                                      category_id = excluded.category_id;
-  exception when others then ok := true;
+  exception when insufficient_privilege or foreign_key_violation then ok := true;
   end;
   if not ok then raise exception 'RLS TEST FAILED: B can take over A''s card by saving one with its id'; end if;
   checks := checks + 3;
@@ -199,31 +204,31 @@ begin
   -- Hang B's rows off A's (knowing their ids).
   ok := false;
   begin insert into heimdesk.categories (id, folder_id, name) values (gen_random_uuid(), fa, 'x');
-  exception when others then ok := true; end;
+  exception when insufficient_privilege or foreign_key_violation then ok := true; end;
   if not ok then raise exception 'RLS TEST FAILED: B can add a column to A''s folder'; end if;
   ok := false;
   begin insert into heimdesk.tasks (id, folder_id, category_id) values (gen_random_uuid(), fb, ca);
-  exception when others then ok := true; end;
+  exception when insufficient_privilege or foreign_key_violation then ok := true; end;
   if not ok then raise exception 'RLS TEST FAILED: B can add a card to A''s column'; end if;
   ok := false;
   begin insert into heimdesk.tasks (id, folder_id, category_id) values (gen_random_uuid(), fa, cb);
-  exception when others then ok := true; end;
+  exception when insufficient_privilege or foreign_key_violation then ok := true; end;
   if not ok then raise exception 'RLS TEST FAILED: B can add a card to A''s folder'; end if;
   ok := false;
   begin insert into heimdesk.checklist_items (id, task_id) values (gen_random_uuid(), ta);
-  exception when others then ok := true; end;
+  exception when insufficient_privilege or foreign_key_violation then ok := true; end;
   if not ok then raise exception 'RLS TEST FAILED: B can add a checklist item to A''s card'; end if;
   ok := false;
   begin insert into heimdesk.note_categories (id, folder_id, name) values (gen_random_uuid(), fa, 'x');
-  exception when others then ok := true; end;
+  exception when insufficient_privilege or foreign_key_violation then ok := true; end;
   if not ok then raise exception 'RLS TEST FAILED: B can add a notes category to A''s folder'; end if;
   ok := false;
   begin insert into heimdesk.notes (id, category_id) values (gen_random_uuid(), nca);
-  exception when others then ok := true; end;
+  exception when insufficient_privilege or foreign_key_violation then ok := true; end;
   if not ok then raise exception 'RLS TEST FAILED: B can add a note to A''s notes category'; end if;
   ok := false;
   begin insert into heimdesk.note_entries (id, note_id) values (gen_random_uuid(), na);
-  exception when others then ok := true; end;
+  exception when insufficient_privilege or foreign_key_violation then ok := true; end;
   if not ok then raise exception 'RLS TEST FAILED: B can add an entry to A''s note'; end if;
   checks := checks + 7;
 
@@ -231,17 +236,45 @@ begin
   if storage_tested then
     select count(*) into n from storage.objects where bucket_id = 'todo-images' and name like a || '/%';
     if n <> 0 then raise exception 'RLS TEST FAILED: B can see A''s images'; end if;
-    delete from storage.objects where bucket_id = 'todo-images' and name like a || '/%';
-    get diagnostics n = row_count;
-    if n <> 0 then raise exception 'RLS TEST FAILED: B can delete A''s images'; end if;
     ok := false;
     begin
       insert into storage.objects (bucket_id, name, owner, owner_id)
       values ('todo-images', a || '/planted.png', b, b::text);
-    exception when others then ok := true;
+    exception when insufficient_privilege or foreign_key_violation then ok := true;
     end;
     if not ok then raise exception 'RLS TEST FAILED: B can put an image in A''s folder'; end if;
-    checks := checks + 3;
+    checks := checks + 2;
+
+    -- Deleting A's images. Supabase blocks deletes from its storage tables in
+    -- SQL, for everyone, so that files and rows stay in step. The test lifts
+    -- that block for this transaction only; the policies still apply. Then A
+    -- deletes their own test image, to show that a delete really goes through
+    -- here, so that B deleting nothing means something. Where the block can't
+    -- be lifted, deleting is covered by the policy check at the top, and the
+    -- result says so.
+    perform set_config('storage.allow_delete_query', 'true', true);
+    ok := false;
+    begin
+      delete from storage.objects where bucket_id = 'todo-images' and name like a || '/%';
+      get diagnostics n = row_count;
+      ok := true;
+    exception when insufficient_privilege then
+      notes := notes || format(' (Deleting images is covered by the policy check only: %s)', sqlerrm);
+    end;
+    if ok then
+      if n <> 0 then raise exception 'RLS TEST FAILED: B can delete A''s images'; end if;
+      perform set_config('request.jwt.claims', json_build_object('sub', a, 'role', 'authenticated')::text, true);
+      begin
+        delete from storage.objects where bucket_id = 'todo-images' and name = a || '/rls-test.png';
+        get diagnostics n = row_count;
+      exception when insufficient_privilege then n := 0;
+      end;
+      if n = 1 then
+        checks := checks + 1;
+      else
+        notes := notes || ' (Deleting images is covered by the policy check only: a test delete didn''t go through here.)';
+      end if;
+    end if;
   end if;
 
   -- ===== Signed out =====
