@@ -497,12 +497,18 @@ The dot in the top right shows the state — saving, saved, or error.
 ### Changes from other devices
 
 Open on the desktop and the phone at once, each shows the other's changes
-without a reload. The app listens for changes to its tables (Supabase
-Realtime; `supabase/schema.sql` adds them to the `supabase_realtime`
-publication), and also catches up whenever it comes back on screen after a
-few seconds away, since a phone drops the connection in the background. Its
-own writes come back over the same connection too; those match what it just
-saved and are ignored.
+without a reload. A trigger in `supabase/schema.sql` announces every change
+to a row on its owner's own private Realtime channel, `heimdesk:<user id>`:
+only that user can join it, and only the trigger can send on it. An
+announcement names the table and row and carries its other columns, but the
+row's text only as SHA-256 fingerprints, since Supabase keeps announcements
+for a few days. The app also catches up whenever it comes back on screen after
+a few seconds away, since a phone drops the connection in the background, and
+reads once a minute while it can't join. Its own saves are announced too;
+those match what it just saved (fingerprints included) and are ignored.
+
+It doesn't use Realtime's `postgres_changes`, which under row-level security
+still tells everyone listening the ids of other users' deleted rows.
 
 Either way it then reads everything again and merges three ways, row by row,
 using the snapshot of what it last saved: a row changed on this device and not

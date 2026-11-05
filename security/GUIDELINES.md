@@ -77,7 +77,10 @@ Every table in the `heimdesk` schema:
   off another user's row;
 - **must** grant `anon` nothing, and grant `authenticated` only `select,
   insert, update, delete`. No `truncate`, `references` or `trigger`;
-- **must** be in the `supabase_realtime` publication if the app syncs it live;
+- **must** have the live-update trigger (`<table>_live`, after insert, update
+  and delete, for each row, calling `heimdesk.broadcast_change()`), and
+  **must not** be in the `supabase_realtime` publication (see "Live updates",
+  below);
 - **must** be added to `supabase/schema.sql` with all of the above, and to
   `supabase/tests/rls_isolation.sql`.
 
@@ -97,6 +100,37 @@ In addition:
   that schema is listed under **Exposed schemas** by hand, and
   `supabase/schema.sql` sets every grant explicitly. Neither of those
   **must** come to rely on a Supabase default.
+
+Live updates (Realtime):
+
+- Changes **must** reach the app only through Broadcast from the database:
+  `heimdesk.broadcast_change()` sends each one with `realtime.send` to the
+  owner's private topic, `heimdesk:<user id>`. Never `postgres_changes`, which
+  under RLS still tells every listener the ids of other users' deleted rows,
+  and never a public channel.
+- `realtime.messages` **must** have RLS on, and exactly two `heimdesk_`
+  policies, both `to authenticated`:
+  - `heimdesk_live_receive`, for select: `extension = 'broadcast'` and
+    `topic = 'heimdesk:' || auth.uid()`;
+  - `heimdesk_live_send`, for insert: the same, plus `private`, and only
+    while the trigger has `heimdesk.broadcast` set to `on`. So no client, the
+    owner's own included, can send on a HeimDesk topic.
+
+  None for `anon`, none for update or delete, and none for presence.
+- An announcement **must** carry only the table, the row's id, its non-text
+  columns, and SHA-256 fingerprints of its text columns. Never the text
+  itself: Supabase keeps announcements in `realtime.messages` for three to
+  four days.
+- An announcement that can't be sent **must not** fail the save.
+  `realtime.send` turns its own errors into warnings. The trigger skips
+  sending if `realtime.send` is missing or can't be called.
+- `realtime.messages` is shared by every project on the instance. No other
+  policy on it **must** let anyone but the owner read a `heimdesk:` topic.
+  `supabase/tests/rls_isolation.sql` checks this the way Realtime does, with
+  Realtime's own `realtime.authorize` where the SQL editor can call it.
+- Realtime's **Allow public access** setting (Realtime settings) should be
+  off once nothing else on the project uses public channels. Then nobody can
+  use the project's Realtime as an open relay with the publishable key.
 
 ### 3. Storage (images)
 
@@ -221,13 +255,6 @@ and nothing a connector sends can steer them.
 These are known and documented. They are not findings, unless a change makes
 them worse.
 
-- **Realtime deletes.** Under RLS, every subscriber to the schema receives the
-  primary key of any deleted row, but no content. The app ignores ids it
-  doesn't hold. This is accepted while HeimDesk has one user. It **must** be
-  fixed before sign-ups open, with per-user channels: Realtime Authorization,
-  with private channels (`private: true`), a topic per user, and RLS policies
-  on `realtime.messages` that admit only that user. Changes then reach them
-  through Broadcast from the database (triggers), not `postgres_changes`.
 - **"Private" cards and notes.** The private flag blurs them on screen. It does
   not encrypt them, and the README says so.
 - **Signed image URLs.** They work for an hour for anyone who has the link.
@@ -279,7 +306,9 @@ risk, not a finding.
 
 Each of these blocks opening sign-ups:
 
-1. The realtime-deletes fix above.
+1. Done: live updates on per-user private channels (rule 2, "Live updates").
+   They replaced `postgres_changes`, which told every listener the ids of
+   other users' deleted rows.
 2. Exposed schemas: confirm that every other exposed schema on the instance
    has owner-scoped RLS (rule 2).
 3. Supabase's Email provider is off, so Google is the only way in.

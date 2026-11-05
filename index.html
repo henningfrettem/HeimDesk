@@ -3431,40 +3431,84 @@ function redrawNoteWhenIdle() {
   noteModal.addEventListener("focusout", check, { once: true });
 }
 
-// Realtime reports each row written, this device's own writes included.
-// Those match what was just saved and are let go; anything else means
-// another device, and a read.
-function onRemoteEvent(p) {
+// The database announces each change to this user's rows, this device's own
+// saves included, on the user's own private channel: "heimdesk:<user id>",
+// which no one else can join and on which nothing but the database can send
+// (see supabase/schema.sql). An announcement names the table and the row, and
+// carries the row's columns, but its text only as SHA-256 fingerprints.
+// Announcements that match what was just saved are let go; anything else
+// means another device, and a read.
+function onRemoteEvent(message) {
+  const p = message && message.payload;
+  if (!p || !SYNC_TABLES.includes(p.table)) return;
   remoteEvents.push(p);
   if (!syncing) checkRemoteEvents();
 }
-const checkRemoteEvents = debounce(() => {
+
+async function sha256Hex(text) {
+  const sum = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(sum), b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Whether an announced change is anything other than what was saved here.
+async function isForeign(p, saved) {
+  const row = (saved[p.table] || []).find(r => r.id === p.row_id);
+  if (p.type === "DELETE") return !!row;
+  if (!row) return true;
+  const cols = p.row || {}, sums = p.sha256 || {};
+  const theirs = {};
+  for (const k of Object.keys(row)) {
+    if (!Object.prototype.hasOwnProperty.call(sums, k)) { theirs[k] = cols[k]; continue; }
+    if (sums[k] !== await sha256Hex(row[k] == null ? "" : String(row[k]))) return true;
+    theirs[k] = row[k];
+  }
+  return !sameRow(row, theirs);
+}
+
+const checkRemoteEvents = debounce(async () => {
   if (syncing || !state) return; // the save weighs them when it's done
   const events = remoteEvents.splice(0);
-  const foreign = events.some(p => {
-    const known = syncedSnapshot[p.table] || [];
-    if (p.eventType === "DELETE") return known.some(r => r.id === (p.old && p.old.id));
-    const row = p.new && known.find(r => r.id === p.new.id);
-    if (!row) return true;
-    const theirs = {};
-    for (const k of Object.keys(row)) theirs[k] = p.new[k];
-    return !sameRow(row, theirs);
-  });
+  const saved = syncedSnapshot;
+  let foreign = false;
+  try {
+    for (const p of events) {
+      if (await isForeign(p, saved)) { foreign = true; break; }
+    }
+  } catch (e) {
+    // Can't tell (no fingerprinting in this browser?): read, to be safe.
+    foreign = true;
+  }
   if (foreign) schedulePull();
 }, 150);
 
-function startLive(schema) {
-  if (liveChannel || !sb || typeof sb.channel !== "function") return;
-  liveChannel = sb.channel("heimdesk-changes")
-    .on("postgres_changes", { event: "*", schema }, onRemoteEvent)
-    .subscribe(status => {
+let liveWarned = false;
+async function startLive() {
+  if (liveChannel || !sb || typeof sb.channel !== "function" || !userId) return;
+  try {
+    const channel = liveChannel = sb.channel("heimdesk:" + userId, { config: { private: true } })
+      .on("broadcast", { event: "*" }, onRemoteEvent);
+    // A private channel is joined with the user's login: make sure Realtime
+    // has it before the join goes out.
+    if (sb.realtime && typeof sb.realtime.setAuth === "function") {
+      try { await sb.realtime.setAuth(); } catch (e) { console.warn("Live updates: no login yet:", e); }
+    }
+    channel.subscribe((status, err) => {
       liveStatus = status;
+      // Refused or dropped: the app reads once a minute instead (below), and
+      // Realtime keeps trying to join.
+      if (status === "CHANNEL_ERROR" && !liveWarned) {
+        liveWarned = true;
+        console.warn("Live updates unavailable for now:", (err && err.message) || status);
+      }
       if (status !== "SUBSCRIBED") return;
       // Joining again after a dropped connection: whatever happened while it
       // was down only shows up by reading.
       if (liveJoined) schedulePull();
       liveJoined = true;
     });
+  } catch (e) {
+    console.warn("Live updates unavailable:", e);
+  }
 }
 
 // Back on screen after a while (a phone reopening the app, a window restored):
@@ -7994,7 +8038,7 @@ async function startApp(user) {
     welcome.hidden = true;
     appRoot.hidden = false;
     fileName.textContent = user.email || "signed in";
-    startLive((loadConfig() || {}).schema || "heimdesk");
+    startLive();
     openPendingLink();
     renderBoard();
     updateFolderLabel();

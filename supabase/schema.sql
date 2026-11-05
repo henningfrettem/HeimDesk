@@ -19,9 +19,9 @@ begin;
 
 -- ---------- From the old name ----------
 -- The app used to be called Todo, and lived in a "todo" schema. Renaming the
--- schema keeps every row, id, index, trigger, policy and grant, and its tables
--- stay in the realtime publication; only the name changes. It happens only
--- when the old schema is unmistakably this app's and "heimdesk" doesn't exist.
+-- schema keeps every row, id, index, trigger, policy and grant; only the name
+-- changes. It happens only when the old schema is unmistakably this app's and
+-- "heimdesk" doesn't exist.
 
 do $$
 begin
@@ -319,26 +319,106 @@ create policy note_categories_owner on heimdesk.note_categories for all to authe
 create policy notes_owner           on heimdesk.notes           for all to authenticated using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 create policy note_entries_owner    on heimdesk.note_entries    for all to authenticated using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
--- ---------- Realtime ----------
--- The app listens for changes to these tables, so an edit on one device shows
--- on the others without a reload. The publication is shared with every other
--- project on this instance, hence the membership check.
+-- ---------- Realtime: live updates ----------
+-- An edit on one device shows on the others without a reload. A trigger
+-- announces each change to a row on its owner's own private channel,
+-- "heimdesk:<user id>". The policies below let only that user join it, and
+-- let nothing but the trigger send on it.
+--
+-- Not postgres_changes: under row-level security that still tells everyone
+-- listening the id of every deleted row, whoever it belonged to. So the
+-- tables come out of the supabase_realtime publication, which other projects
+-- on this instance may still use.
+--
+-- An announcement carries the row's id and its other columns, but its text
+-- only as SHA-256 fingerprints: enough for the app to tell its own saves from
+-- another device's change, which it then reads in full. Supabase keeps each
+-- announcement in realtime.messages for three to four days, so no card or
+-- note text is kept there.
+--
+-- The trigger runs as the signed-in user, like every function here (no
+-- security definer). realtime.send turns its own failures into a warning,
+-- and the trigger stands aside if Supabase ever moves realtime.send or takes
+-- away the right to call it: a live update never stands in the way of a save.
+
+create or replace function heimdesk.broadcast_change() returns trigger
+  language plpgsql set search_path = '' as $$
+declare
+  send regprocedure := to_regprocedure('realtime.send(jsonb, text, text, boolean)');
+  r record;
+  body jsonb;
+  cols jsonb;
+  sums jsonb;
+begin
+  if send is null then return null; end if;
+  if not has_function_privilege(send, 'execute') or not has_schema_privilege('realtime', 'usage') then
+    return null;
+  end if;
+
+  if tg_op = 'DELETE' then
+    r := old;
+    body := jsonb_build_object('table', tg_table_name, 'type', tg_op, 'row_id', r.id);
+  else
+    r := new;
+    select coalesce(jsonb_object_agg(a.attname, v.j -> a.attname)
+                      filter (where a.atttypid <> 'text'::regtype), '{}'),
+           coalesce(jsonb_object_agg(a.attname, encode(sha256(convert_to(coalesce(v.j ->> a.attname, ''), 'UTF8')), 'hex'))
+                      filter (where a.atttypid = 'text'::regtype), '{}')
+      into cols, sums
+      from pg_catalog.pg_attribute a, (select to_jsonb(new) as j) v
+     where a.attrelid = tg_relid and a.attnum > 0 and not a.attisdropped;
+    body := jsonb_build_object('table', tg_table_name, 'type', tg_op, 'row_id', r.id,
+                               'row', cols, 'sha256', sums);
+  end if;
+
+  -- The send policy below admits only what's sent while this is on.
+  perform set_config('heimdesk.broadcast', 'on', true);
+  perform realtime.send(body, tg_op, 'heimdesk:' || r.user_id::text, true);
+  perform set_config('heimdesk.broadcast', '', true);
+  return null;
+end $$;
+
+revoke all on function heimdesk.broadcast_change() from public, anon, authenticated;
 
 do $$
 declare t text;
 begin
-  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
-    create publication supabase_realtime;
-  end if;
   foreach t in array array['folders', 'categories', 'tasks', 'checklist_items', 'note_categories', 'notes', 'note_entries'] loop
-    if not exists (
-      select 1 from pg_publication_tables
-      where pubname = 'supabase_realtime' and schemaname = 'heimdesk' and tablename = t
-    ) then
-      execute format('alter publication supabase_realtime add table heimdesk.%I', t);
-    end if;
+    execute format('drop trigger if exists %I on heimdesk.%I', t || '_live', t);
+    execute format('create trigger %I after insert or update or delete on heimdesk.%I '
+                   'for each row execute function heimdesk.broadcast_change()', t || '_live', t);
+  end loop;
+  for t in select tablename from pg_publication_tables
+           where pubname = 'supabase_realtime' and schemaname = 'heimdesk' loop
+    execute format('alter publication supabase_realtime drop table heimdesk.%I', t);
+    raise notice 'Took heimdesk.% out of the realtime publication.', t;
   end loop;
 end $$;
+
+-- Realtime lets someone join a private channel only if row-level security on
+-- realtime.messages lets them read a test message on it, and send on it only
+-- if they could insert one. That table is shared with every other project on
+-- this instance, hence the project-prefixed names.
+
+do $$
+begin
+  if to_regclass('realtime.messages') is null then
+    raise exception 'realtime.messages doesn''t exist: is Realtime enabled on this project?';
+  end if;
+  if not (select relrowsecurity from pg_class where oid = 'realtime.messages'::regclass) then
+    raise exception 'Row-level security is off on realtime.messages, so anyone could join anyone''s channel. Nothing was changed.';
+  end if;
+end $$;
+
+drop policy if exists heimdesk_live_receive on realtime.messages;
+drop policy if exists heimdesk_live_send    on realtime.messages;
+
+create policy heimdesk_live_receive on realtime.messages for select to authenticated
+  using (extension = 'broadcast' and topic = 'heimdesk:' || (select auth.uid())::text);
+create policy heimdesk_live_send on realtime.messages for insert to authenticated
+  with check (extension = 'broadcast' and private
+              and topic = 'heimdesk:' || (select auth.uid())::text
+              and (select current_setting('heimdesk.broadcast', true)) = 'on');
 
 -- ---------- Storage bucket for pasted images ----------
 -- Buckets are global to the instance, so the name is project-prefixed. It
@@ -392,9 +472,22 @@ begin
     if has_table_privilege('anon', format('heimdesk.%I', t), 'select') then
       raise exception 'anon can still read heimdesk.%', t;
     end if;
+    if exists (select 1 from pg_publication_tables
+               where pubname = 'supabase_realtime' and schemaname = 'heimdesk' and tablename = t) then
+      raise exception 'heimdesk.% is still in the realtime publication', t;
+    end if;
+    if not exists (select 1 from pg_trigger
+                   where tgrelid = format('heimdesk.%I', t)::regclass and tgname = t || '_live'
+                     and tgfoid = 'heimdesk.broadcast_change()'::regprocedure) then
+      raise exception 'heimdesk.% has no live-update trigger', t;
+    end if;
     execute format('select count(*) from heimdesk.%I', t) into n;
     report := report || format('%s %s, ', t, n);
   end loop;
+  if (select count(*) from pg_policies where schemaname = 'realtime' and tablename = 'messages'
+        and policyname in ('heimdesk_live_receive', 'heimdesk_live_send')) <> 2 then
+    raise exception 'The live-update policies on realtime.messages are missing';
+  end if;
   raise notice 'heimdesk rows: %', rtrim(report, ', ');
 end $$;
 
