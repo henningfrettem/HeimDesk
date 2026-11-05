@@ -3524,7 +3524,7 @@ function renderMarkdown(src) {
     let t = escapeHtml(s);
     // images first (so they don't clash with links)
     t = t.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, url) => {
-      const safeUrl = /^(sb:|https?:|data:)/i.test(url) ? url : "#";
+      const safeUrl = /^(sb:|https:|data:)/i.test(url) ? url : "#";
       return `<img data-src="${escapeHtml(safeUrl)}" alt="${alt}" loading="lazy">`;
     });
     t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (m, text, url) =>

@@ -22,6 +22,9 @@
 - **Monthly full scan.** When the gate or the session reminder says the full
   scan is due, run the `security-full-scan` agent. It runs on the most capable
   model and records the scan date.
+- **No connectors for the security agents.** Start them so that none of the
+  account's connectors load, e.g. from a terminal:
+  `claude -p "<what to audit>" --agent security-auditor --strict-mcp-config`.
 - **Policy.** The policy is `security/GUIDELINES.md`.
 - **No breaking changes without a migration.** A schema change ships in
   `supabase/schema.sql`, which must stay safe to re-run, and must work with the

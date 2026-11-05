@@ -579,11 +579,18 @@ it audits against is [`security/GUIDELINES.md`](security/GUIDELINES.md).
   to the gate takes effect only once it has been audited and committed.
 
 - **Monthly.** Every 30 days the `security-full-scan` agent, on the most
-  capable model, reviews the whole app. It brings the guidelines up to date
-  with current guidance, checks the bundled library for advisories, and
-  checks the live site read-only. It also lists what to confirm in the
-  dashboards. Once it falls due, sessions open with a reminder. A week after
-  that, the gate holds all commits until it has run.
+  capable model, reviews the whole app. It checks the guidelines against
+  current guidance and proposes updates, checks the bundled library for
+  advisories, and checks the live site read-only. It also lists what to
+  confirm in the dashboards. Once it falls due, sessions open with a reminder.
+  A week after that, the gate holds all commits until it has run.
+- **No connectors.** Both agents run without the account's connectors (mail,
+  calendar, documents and the like). Started from a terminal, that's
+  `--strict-mcp-config`:
+
+  ```bash
+  claude -p "Audit the staged change" --agent security-auditor --strict-mcp-config
+  ```
 - **In Claude Code**, `.claude/settings.json` adds the reminder and a guard,
   both run from the committed gate. The guard:
   - stops anyone from skipping the hooks (`--no-verify`, changing

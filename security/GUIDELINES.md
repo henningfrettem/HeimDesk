@@ -4,7 +4,7 @@ The policy the security auditor holds every change to, and the monthly full
 scan holds the whole app to. A change that breaks a rule marked **must** fails
 the audit.
 
-Last reviewed: 2026-11-04, against:
+Last reviewed: 2026-11-05, after the first full scan, against:
 
 - OWASP Top 10:2025
 - OWASP ASVS 5.0.0
@@ -54,6 +54,11 @@ The people to defend against:
   `.security/config.json`.
 - Only the publishable key **must** reach the browser. `deploy/build.js`
   refuses a secret key. It copies an explicit list of files and nothing else.
+- Supabase is deprecating the legacy `anon` and `service_role` keys (JWTs) by
+  the end of 2026. HeimDesk uses only the publishable key (`sb_publishable_`).
+  Creating the new keys didn't switch the old ones off: the owner disables
+  them under **Settings → API Keys** once nothing else on the project uses
+  them.
 - Session tokens **must not** be logged, put in URLs, or sent anywhere other
   than Supabase.
 
@@ -87,6 +92,11 @@ In addition:
   on the same Supabase instance that is exposed **must** have its own
   owner-scoped RLS before sign-ups open: sign-ins are shared across the
   instance.
+- Supabase's change of 30 October 2026 stops new tables in `public` from
+  reaching the Data API automatically. It changes nothing for `heimdesk`:
+  that schema is listed under **Exposed schemas** by hand, and
+  `supabase/schema.sql` sets every grant explicitly. Neither of those
+  **must** come to rely on a Supabase default.
 
 ### 3. Storage (images)
 
@@ -100,6 +110,12 @@ In addition:
   since they can carry script.
 - The client **must** check the type and size before uploading, and name the
   file from the checked type, never from the file's own name.
+- Since January 2026, Supabase refuses deletes from its storage tables made
+  in SQL (the `storage.protect_delete` trigger), so that files and their rows
+  stay in step. Images **must** be deleted only through the Storage API. Only
+  `supabase/tests/rls_isolation.sql` lifts the block
+  (`storage.allow_delete_query`), inside its own transaction, which it always
+  rolls back.
 
 ### 4. Rendering user content (A05 Injection, XSS)
 
@@ -112,8 +128,11 @@ since it may have been copied from elsewhere.
 - Pasted HTML **must** be sanitized to the allowlist, never inserted raw.
 - Links **must** allow only `http:`, `https:` and `mailto:`, plus the app's own
   `#card=`/`#note=`/`#entry=` links. Never `javascript:`, `data:` or `vbscript:`.
-- Images **must** allow only `sb:` references, `https:` and `data:` URLs, and
-  only ever as an `<img>` source, never as a link target.
+- Images **must** only ever be an `<img>` source, never a link target:
+  - in a card's description (`renderMarkdown`), only `sb:` references,
+    `https:` and `data:` URLs; plain `http:` isn't allowed;
+  - in a note (`cleanNoteHtml`), only an image file reference (`data-sb`),
+    never a URL.
 - External links **must** have `rel="noopener noreferrer"`.
 - Nothing **must** reach `eval`, `new Function`, `setTimeout` with a string,
   or inline event handlers built from data.
@@ -138,7 +157,10 @@ since it may have been copied from elsewhere.
 - A change that adds a script, style, font, frame or connection to a new
   origin **must** be called out.
 - A full `Content-Security-Policy` (script-src etc.) is a recommended next step
-  that the full scan tracks.
+  that the full scan tracks. So is Trusted Types, which every major browser has
+  supported since February 2026: `require-trusted-types-for 'script'`, with one
+  named policy that only `cleanNoteHtml` and `renderMarkdown` output passes
+  through, would make any other HTML sink an error rather than a hole.
 - `localStorage`/`sessionStorage` **must not** hold anything beyond
   preferences, the pending link and supabase-js's own session.
 
@@ -146,8 +168,17 @@ since it may have been copied from elsewhere.
 
 - Third-party code **must** be vendored into the repo, at a known version, or
   loaded from a pinned exact version with Subresource Integrity.
-- The bundled supabase-js version (2.116.0 at the last review) is checked
-  against published advisories on every full scan.
+- The bundled supabase-js version (2.116.0 at the last review; 2.119.0 was
+  current) is checked against published advisories on every full scan. An
+  advisory that applies to the bundled version **must** be fixed by a bump
+  before the next deploy. Without one, the bump waits for a convenient change
+  and is tested like any other.
+- `migrate.html` loads the same supabase-js from a CDN, so its `<script>`
+  **must** keep the exact version and an `integrity` hash, which a bump
+  updates together with the bundled copy.
+- The app's HTML sanitiser is its own, an allowlist. If it is ever replaced,
+  OWASP's recommendation is DOMPurify: vendored at a pinned version like
+  supabase-js, with its advisories checked on every full scan.
 - No build step **must** pull packages at deploy time. `deploy/build.js` uses
   Node's standard library only.
 
@@ -180,6 +211,11 @@ Any change to these that weakens a check, widens what can be committed, or
 lets something skip the audit fails, unless the owner has asked for that
 change in so many words.
 
+The security agents **must** run without the account's connectors (mail,
+calendar, documents, accounting and the like). Started from a terminal, that
+is `--strict-mcp-config`. Then nothing they review can reach those services,
+and nothing a connector sends can steer them.
+
 ## Accepted risks
 
 These are known and documented. They are not findings, unless a change makes
@@ -188,8 +224,10 @@ them worse.
 - **Realtime deletes.** Under RLS, every subscriber to the schema receives the
   primary key of any deleted row, but no content. The app ignores ids it
   doesn't hold. This is accepted while HeimDesk has one user. It **must** be
-  fixed before sign-ups open, with per-user channels: Realtime Broadcast with
-  authorization.
+  fixed before sign-ups open, with per-user channels: Realtime Authorization,
+  with private channels (`private: true`), a topic per user, and RLS policies
+  on `realtime.messages` that admit only that user. Changes then reach them
+  through Broadcast from the database (triggers), not `postgres_changes`.
 - **"Private" cards and notes.** The private flag blurs them on screen. It does
   not encrypt them, and the README says so.
 - **Signed image URLs.** They work for an hour for anyone who has the link.

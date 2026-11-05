@@ -72,8 +72,14 @@
   <div id="log"></div>
 </main>
 
-<!-- Classic script, so no CORS check applies from a file:// page. Pinned. -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.116.0/dist/umd/supabase.js"></script>
+<!-- Pinned to the version index.html bundles, and checked against its hash:
+     the browser refuses the file if a single byte differs. The check needs a
+     CORS request, which the CDN allows from any origin, file:// included.
+     After a version bump, take the new hash of the exact file:
+       curl -sL <url> | openssl dgst -sha384 -binary | openssl base64 -A -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.116.0/dist/umd/supabase.js"
+        integrity="sha384-iLddHTLokph6Omwoyid4XKxHaWa6w41BnoEj0q5oOrzmYPpHIKt1wyjReA7s//pP"
+        crossorigin="anonymous"></script>
 <script>
 const $ = s => document.querySelector(s);
 const logEl = $("#log");
